@@ -2,66 +2,95 @@ name: Construir instaladores
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
   windows:
     name: Instalador de Windows (.exe)
-    runs-on: windows-latest
+    runs-on: windows-2022
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - name: Ubicar el proyecto
+        shell: bash
+        run: |
+          if [ ! -f package.json ]; then
+            p=$(find . -maxdepth 4 -name package.json -not -path "*/node_modules/*" | head -1)
+            if [ -z "$p" ]; then echo "::error::No hay package.json en el repositorio. Sube todos los archivos del proyecto."; ls -la; exit 1; fi
+            echo "El proyecto está en $(dirname "$p"); lo paso a la raíz."; cp -r "$(dirname "$p")"/. .
+          fi
+          for f in package.json web/index.html electron/main.js build/icon.png; do
+            [ -f "$f" ] || { echo "::error::Falta el archivo $f en el repositorio"; exit 1; }
+          done
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
-      - run: npm install
-      - run: npx electron-builder --win nsis --publish never
-      - uses: actions/upload-artifact@v4
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx electron-builder --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v6
         with:
           name: Turno-Windows
           path: dist/*.exe
+          if-no-files-found: error
 
   android:
     name: App de Android (.apk)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - name: Ubicar el proyecto
+        shell: bash
+        run: |
+          if [ ! -f package.json ]; then
+            p=$(find . -maxdepth 4 -name package.json -not -path "*/node_modules/*" | head -1)
+            if [ -z "$p" ]; then echo "::error::No hay package.json en el repositorio. Sube todos los archivos del proyecto."; ls -la; exit 1; fi
+            echo "El proyecto está en $(dirname "$p"); lo paso a la raíz."; cp -r "$(dirname "$p")"/. .
+          fi
+          for f in package.json web/index.html capacitor.config.json assets/icon-only.png; do
+            [ -f "$f" ] || { echo "::error::Falta el archivo $f en el repositorio"; exit 1; }
+          done
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
-      - uses: actions/setup-java@v4
+          node-version: 22
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
-      - run: npm install
+      - run: npm install --no-audit --no-fund
       - run: npx cap add android
       - name: Íconos y pantalla de inicio
         run: npx capacitor-assets generate --android
-        continue-on-error: true
       - run: npx cap sync android
       - name: Compilar APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: Turno-Android
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
 
   web:
     name: Versión web instalable (GitHub Pages)
-    runs-on: ubuntu-latest
-    continue-on-error: true
+    # Solo corre si creas la variable PUBLICAR_WEB = true (ver LEEME.md).
+    if: vars.PUBLICAR_WEB == 'true'
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v6
+      - name: Ubicar el proyecto
+        run: |
+          if [ ! -d web ]; then d=$(dirname "$(find . -maxdepth 4 -name index.html -path "*/web/*" | head -1)"); cp -r "$d" ./web; fi
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
